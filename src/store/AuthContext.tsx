@@ -1,36 +1,56 @@
-import { create } from 'zustand'
-import {
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  User,
-} from 'firebase/auth'
-import { doc, getDoc } from 'firebase/firestore'
-import { auth, db } from '../lib/firebase'
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
-interface AuthState {
+interface User {
+  email: string
+  name: string
+  role: 'admin' | 'operator'
+}
+
+interface AuthContextType {
   user: User | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
-  logOut: () => Promise<void>
+  logOut: () => void
 }
 
-export const useAuth = create<AuthState>((set) => ({
+const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  signIn: async (email: string, password: string) => {
-    const result = await signInWithEmailAndPassword(auth, email, password)
-    const userDoc = await getDoc(doc(db, 'users', result.user.uid))
-    if (userDoc.exists()) {
-      set({ user: result.user })
-    }
-  },
-  logOut: async () => {
-    await signOut(auth)
-    set({ user: null })
-  },
-}))
-
-onAuthStateChanged(auth, (user) => {
-  useAuth.setState({ user, loading: false })
+  signIn: async () => {},
+  logOut: () => {},
 })
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('soyama_user')
+    if (stored) {
+      setUser(JSON.parse(stored))
+    }
+    setLoading(false)
+  }, [])
+
+  const signIn = async (email: string, password: string) => {
+    if (!email || !password) throw new Error('Email e senha obrigatórios')
+    const u: User = { email, name: email.split('@')[0], role: 'admin' }
+    localStorage.setItem('soyama_user', JSON.stringify(u))
+    setUser(u)
+  }
+
+  const logOut = () => {
+    localStorage.removeItem('soyama_user')
+    setUser(null)
+  }
+
+  return (
+    <AuthContext.Provider value={{ user, loading, signIn, logOut }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export function useAuth() {
+  return useContext(AuthContext)
+}

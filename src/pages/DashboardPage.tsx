@@ -1,72 +1,43 @@
-import { useEffect, useState } from 'react'
-import {
-  collection,
-  query,
-  orderBy,
-  limit,
-  getDocs,
-  onSnapshot,
-} from 'firebase/firestore'
-import { db } from '../lib/firebase'
-import { Stock, Grain, Warehouse, Movement } from '../types'
+import { useState, useEffect } from 'react'
+import { db } from '../lib/storage'
 
 export default function DashboardPage() {
-  const [stocks, setStocks] = useState<Stock[]>([])
-  const [grains, setGrains] = useState<Grain[]>([])
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
-  const [movements, setMovements] = useState<Movement[]>([])
-  const [loading, setLoading] = useState(true)
+  const [grains, setGrains] = useState<any[]>([])
+  const [warehouses, setWarehouses] = useState<any[]>([])
+  const [movements, setMovements] = useState<any[]>([])
 
   useEffect(() => {
-    const unsubStocks = onSnapshot(collection(db, 'stock'), (snap) => {
-      setStocks(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Stock)))
-    })
-
-    const unsubGrains = onSnapshot(collection(db, 'grains'), (snap) => {
-      setGrains(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Grain)))
-    })
-
-    const unsubWarehouses = onSnapshot(collection(db, 'warehouses'), (snap) => {
-      setWarehouses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Warehouse)))
-    })
-
-    const q = query(collection(db, 'movements'), orderBy('createdAt', 'desc'), limit(10))
-    const unsubMovements = onSnapshot(q, (snap) => {
-      setMovements(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Movement)))
-      setLoading(false)
-    })
-
-    return () => {
-      unsubStocks()
-      unsubGrains()
-      unsubWarehouses()
-      unsubMovements()
-    }
+    setGrains(db.grains().getAll())
+    setWarehouses(db.warehouses().getAll())
+    setMovements(db.movements().getAll().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
   }, [])
 
-  const totalStock = stocks.reduce((acc, s) => acc + s.quantity, 0)
+  const stockByGrain = grains.map((g) => {
+    const stocks = movements.reduce((acc: Record<string, number>, m: any) => {
+      if (m.grainId !== g.id) return acc
+      if (m.type === 'entry') acc[m.warehouseId] = (acc[m.warehouseId] || 0) + m.quantity
+      if (m.type === 'exit') acc[m.warehouseId] = (acc[m.warehouseId] || 0) - m.quantity
+      if (m.type === 'transfer') {
+        acc[m.warehouseId] = (acc[m.warehouseId] || 0) - m.quantity
+        acc[m.toWarehouseId] = (acc[m.toWarehouseId] || 0) + m.quantity
+      }
+      return acc
+    }, {})
+    const total = Object.values(stocks).reduce((sum: number, q: any) => sum + q, 0)
+    return { grain: g, total: total > 0 ? total : 0 }
+  })
 
-  const stockByGrain = grains.map((g) => ({
-    grain: g,
-    total: stocks.filter((s) => s.grainId === g.id).reduce((acc, s) => acc + s.quantity, 0),
-  }))
+  const totalStock = stockByGrain.reduce((sum, sg) => sum + sg.total, 0)
 
   const getGrainName = (id: string) => grains.find((g) => g.id === id)?.name || id
+  const getGrainUnit = (id: string) => grains.find((g) => g.id === id)?.unit || ''
   const getWarehouseName = (id: string) => warehouses.find((w) => w.id === id)?.name || id
-
-  if (loading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-green-600 border-t-transparent" />
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500">Visão geral do estoque</p>
+        <p className="text-sm text-gray-500">Visão geral do estoque — dados de demonstração</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -83,7 +54,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-
         <div className="rounded-xl bg-white p-6 shadow">
           <div className="flex items-center justify-between">
             <div>
@@ -97,7 +67,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-
         <div className="rounded-xl bg-white p-6 shadow">
           <div className="flex items-center justify-between">
             <div>
@@ -111,7 +80,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-
         <div className="rounded-xl bg-white p-6 shadow">
           <div className="flex items-center justify-between">
             <div>
@@ -136,20 +104,14 @@ export default function DashboardPage() {
                 <span className="text-sm text-gray-700">{grain.name}</span>
                 <div className="flex items-center gap-2">
                   <div className="h-2 w-32 rounded-full bg-gray-200">
-                    <div
-                      className="h-2 rounded-full bg-green-600"
-                      style={{ width: `${Math.min((total / totalStock) * 100, 100)}%` }}
-                    />
+                    <div className="h-2 rounded-full bg-green-600" style={{ width: totalStock ? `${Math.min((total / totalStock) * 100, 100)}%` : '0%' }} />
                   </div>
-                  <span className="text-sm font-medium text-gray-900">
-                    {total.toLocaleString()} {grain.unit}
-                  </span>
+                  <span className="text-sm font-medium">{total.toLocaleString()} {getGrainUnit(grain.id)}</span>
                 </div>
               </div>
             ))}
           </div>
         </div>
-
         <div className="rounded-xl bg-white p-6 shadow">
           <h2 className="mb-4 text-lg font-semibold text-gray-900">Últimas Movimentações</h2>
           <div className="space-y-3">
@@ -159,17 +121,13 @@ export default function DashboardPage() {
                   <p className="text-sm font-medium text-gray-900">
                     {m.type === 'entry' ? 'Entrada' : m.type === 'exit' ? 'Saída' : 'Transferência'}
                   </p>
-                  <p className="text-xs text-gray-500">
-                    {getGrainName(m.grainId)} • {getWarehouseName(m.warehouseId)}
-                  </p>
+                  <p className="text-xs text-gray-500">{getGrainName(m.grainId)} &middot; {getWarehouseName(m.warehouseId)}</p>
                 </div>
                 <div className="text-right">
                   <p className={`text-sm font-medium ${m.type === 'entry' ? 'text-green-600' : 'text-red-600'}`}>
                     {m.type === 'entry' ? '+' : '-'}{m.quantity.toLocaleString()}
                   </p>
-                  <p className="text-xs text-gray-500">
-                    {m.createdAt.toDate().toLocaleDateString('pt-BR')}
-                  </p>
+                  <p className="text-xs text-gray-500">{new Date(m.createdAt).toLocaleDateString('pt-BR')}</p>
                 </div>
               </div>
             ))}
